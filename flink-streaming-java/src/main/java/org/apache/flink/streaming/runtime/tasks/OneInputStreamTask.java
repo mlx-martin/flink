@@ -86,8 +86,10 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
 
 		if (numberOfInputs > 0) {
 			CheckpointedInputGate inputGate = createCheckpointedInputGate();
-			DataOutput<IN> output = createDataOutput();
+			Counter numRecordsIn = setupNumRecordsInCounter(mainOperator);
+			DataOutput<IN> output = createDataOutput(numRecordsIn);
 			StreamTaskInput<IN> input = createTaskInput(inputGate, output);
+			getEnvironment().getMetricGroup().getIOMetricGroup().reuseRecordsInputCounter(numRecordsIn);
 			inputProcessor = new StreamOneInputProcessor<>(
 				input,
 				output,
@@ -107,15 +109,16 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
 			getCheckpointCoordinator(),
 			inputGates,
 			getEnvironment().getMetricGroup().getIOMetricGroup(),
-			getTaskNameWithSubtaskAndId());
+			getTaskNameWithSubtaskAndId(),
+			mainMailboxExecutor);
 	}
 
-	private DataOutput<IN> createDataOutput() {
+	private DataOutput<IN> createDataOutput(Counter numRecordsIn) {
 		return new StreamTaskNetworkOutput<>(
 			mainOperator,
 			getStreamStatusMaintainer(),
 			inputWatermarkGauge,
-			setupNumRecordsInCounter(mainOperator));
+			numRecordsIn);
 	}
 
 	private StreamTaskInput<IN> createTaskInput(CheckpointedInputGate inputGate, DataOutput<IN> output) {

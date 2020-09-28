@@ -42,6 +42,7 @@ import org.apache.flink.runtime.io.network.api.writer.RecordWriterBuilder;
 import org.apache.flink.runtime.io.network.api.writer.RecordWriterDelegate;
 import org.apache.flink.runtime.io.network.api.writer.ResultPartitionWriter;
 import org.apache.flink.runtime.io.network.api.writer.SingleRecordWriter;
+import org.apache.flink.runtime.io.network.partition.ChannelStateHolder;
 import org.apache.flink.runtime.io.network.partition.CheckpointedResultPartition;
 import org.apache.flink.runtime.io.network.partition.consumer.InputGate;
 import org.apache.flink.runtime.jobgraph.OperatorID;
@@ -313,6 +314,21 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		}
 
 		this.channelIOExecutor = Executors.newSingleThreadExecutor(new ExecutorThreadFactory("channel-state-unspilling"));
+
+		injectChannelStateWriterIntoChannels();
+	}
+
+	private void injectChannelStateWriterIntoChannels() {
+		final Environment env = getEnvironment();
+		final ChannelStateWriter channelStateWriter = subtaskCheckpointCoordinator.getChannelStateWriter();
+		for (final InputGate gate : env.getAllInputGates()) {
+			gate.setChannelStateWriter(channelStateWriter);
+		}
+		for (ResultPartitionWriter writer : env.getAllWriters()) {
+			if (writer instanceof ChannelStateHolder) {
+				((ChannelStateHolder) writer).setChannelStateWriter(channelStateWriter);
+			}
+		}
 	}
 
 	private CompletableFuture<Void> prepareInputSnapshot(ChannelStateWriter channelStateWriter, long checkpointId) throws IOException {
@@ -567,6 +583,11 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	@VisibleForTesting
 	public boolean runMailboxStep() throws Exception {
 		return mailboxProcessor.runMailboxStep();
+	}
+
+	@VisibleForTesting
+	public boolean isMailboxLoopRunning() {
+		return mailboxProcessor.isMailboxLoopRunning();
 	}
 
 	private void runMailboxLoop() throws Exception {
@@ -865,18 +886,6 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 					"invokable was not in state running.", checkpointMetaData.getCheckpointId(), getName(), e);
 				return false;
 			}
-		}
-	}
-
-	@Override
-	public <E extends Exception> void executeInTaskThread(
-			ThrowingRunnable<E> runnable,
-			String descriptionFormat,
-			Object... descriptionArgs) throws E {
-		if (mailboxProcessor.isMailboxThread()) {
-			runnable.run();
-		} else {
-			mainMailboxExecutor.execute(runnable, descriptionFormat, descriptionArgs);
 		}
 	}
 
